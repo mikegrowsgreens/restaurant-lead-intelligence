@@ -1,0 +1,115 @@
+{
+  "sheetName": "Master",
+  "columns": [
+    {
+      "name": "Restaurant ID",
+      "type": "string",
+      "description": "Unique identifier (ToastTab URL slug or generated UUID)",
+      "required": true
+    },
+    {
+      "name": "Business Name",
+      "type": "string",
+      "description": "Restaurant name",
+      "required": true
+    },
+    {
+      "name": "Address",
+      "type": "string",
+      "description": "Street address",
+      "required": false
+    },
+    {
+      "name": "City",
+      "type": "string",
+      "description": "City name",
+      "required": true
+    },
+    {
+      "name": "State",
+      "type": "string",
+      "description": "Two-letter state code (CT, MA, etc.)",
+      "required": true
+    },
+    {
+      "name": "Phone",
+      "type": "string",
+      "description": "Business phone number",
+      "required": false
+    },
+    {
+      "name": "Website",
+      "type": "string",
+      "description": "Official website URL (not ToastTab)",
+      "required": false
+    },
+    {
+      "name": "Cuisine Type",
+      "type": "string",
+      "description": "Primary cuisine category",
+      "required": false
+    },
+    {
+      "name": "Google Rating",
+      "type": "number",
+      "description": "Google Maps rating (1.0-5.0)",
+      "required": false
+    },
+    {
+      "name": "Review Count",
+      "type": "number",
+      "description": "Number of Google reviews",
+      "required": false
+    },
+    {
+      "name": "Status",
+      "type": "string",
+      "description": "Enrichment status: Pending, Email Found, No Email Found",
+      "required": true,
+      "values": ["Pending", "Email Found", "No Email Found"]
+    },
+    {
+      "name": "Primary Email",
+      "type": "string",
+      "description": "Best email found (prioritized)",
+      "required": false
+    },
+    {
+      "name": "All Emails",
+      "type": "string",
+      "description": "Comma-separated list of all valid emails found",
+      "required": false
+    },
+    {
+      "name": "Enrichment Confidence",
+      "type": "number",
+      "description": "Confidence score 0.00-0.95",
+      "required": false
+    },
+    {
+      "name": "Last Enriched",
+      "type": "date",
+      "description": "Date of last enrichment attempt (YYYY-MM-DD)",
+      "required": false
+    },
+    {
+      "name": "Lead Score",
+      "type": "number",
+      "description": "ICP qualification score",
+      "required": false
+    },
+    {
+      "name": "POS System",
+      "type": "string",
+      "description": "Point of sale system (Toast, Square, etc.)",
+      "required": false
+    },
+    {
+      "name": "Third Party Delivery",
+      "type": "string",
+      "description": "Delivery platforms used (DoorDash, UberEats, etc.)",
+      "required": false
+    }
+  ],
+  "notes": "Create this sheet structure before running workflows. The 'Restaurant ID' column is used as the unique key for upserts."
+}

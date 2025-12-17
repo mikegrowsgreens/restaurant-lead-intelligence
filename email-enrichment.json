@@ -1,0 +1,762 @@
+{
+  "name": "Restaurant Email Enrichment - ID Based (Production Ready)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d72a3e18-6f17-4be5-8865-7bec8e48eaf1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -656
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEETS_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Master",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "7940d241-ca25-49e1-8d26-366812044a79",
+      "name": "Read Restaurants",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        -656
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter for rows that need email enrichment\nconst itemsToProcess = [];\n\nfor (const item of $input.all()) {\n  const id = item.json['Restaurant ID'];\n  const status = item.json['Status'] || '';\n  const primaryEmail = item.json['Primary Email'] || '';\n  const businessName = item.json['Business Name'];\n  const city = item.json['City'];\n  const website = item.json['Website'] || '';\n  \n  if (id && businessName && city && (!primaryEmail || status === '' || status === 'Pending')) {\n    itemsToProcess.push({\n      json: {\n        restaurant_id: id,\n        business_name: businessName,\n        address: item.json['Address'] || '',\n        city: city,\n        state: item.json['State'] || '',\n        phone: item.json['Phone'] || '',\n        website: website.trim(),\n        has_website: website.trim().length > 0\n      }\n    });\n  }\n}\n\nreturn itemsToProcess;"
+      },
+      "id": "7746968c-6a98-4bed-86b4-a6d75ec58479",
+      "name": "Filter Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -656
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-KEY",
+              "value": "YOUR_SERPER_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"q\": $json.business_name + \" \" + $json.city + \" \" + $json.state + \" facebook contact email\", \"num\": 10, \"gl\": \"us\" } }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5
+            }
+          }
+        }
+      },
+      "id": "0973def1-cc89-4e98-bf0b-1c802fed7c19",
+      "name": "Search All Sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const organic = item.json.organic || [];\n  const restaurantId = item.json.restaurant_id;\n  const businessName = item.json.business_name || '';\n\n  const urlsToScrape = [];\n  let facebookPage = '';\n  let officialWebsite = '';\n\n  for (const result of organic) {\n    const link = result.link || '';\n    \n    if (link.includes('facebook.com/') && !facebookPage) {\n      const cleanUrl = link.split('?')[0];\n      if (cleanUrl.includes('/posts/') || cleanUrl.includes('/photos/')) {\n        const pageMatch = cleanUrl.match(/facebook\\.com\\/[^\\/]+/);\n        if (pageMatch) facebookPage = 'https://' + pageMatch[0];\n      } else {\n        facebookPage = cleanUrl;\n      }\n    }\n  }\n\n  for (const result of organic) {\n    const link = result.link || '';\n    const title = result.title || '';\n    \n    if (link.includes('yelp.com') || link.includes('tripadvisor') ||\n        link.includes('facebook.com') || link.includes('instagram.com') ||\n        link.includes('doordash.com') || link.includes('grubhub.com') ||\n        link.includes('ubereats.com') || link.includes('opentable.com')) {\n      continue;\n    }\n    \n    if (businessName) {\n      const businessWords = businessName.toLowerCase().split(' ');\n      const hasNameInUrl = businessWords.some(word => link.toLowerCase().includes(word));\n      const hasNameInTitle = businessWords.some(word => title.toLowerCase().includes(word));\n      \n      if ((hasNameInUrl || hasNameInTitle) && !officialWebsite) {\n        officialWebsite = link;\n        break;\n      }\n    }\n  }\n\n  if (facebookPage) {\n    urlsToScrape.push({ url: facebookPage + '/about', type: 'facebook_about' });\n    urlsToScrape.push({ url: facebookPage, type: 'facebook_main' });\n  }\n\n  if (officialWebsite) {\n    urlsToScrape.push({ url: officialWebsite + '/contact', type: 'website_contact' });\n    urlsToScrape.push({ url: officialWebsite + '/about', type: 'website_about' });\n    urlsToScrape.push({ url: officialWebsite, type: 'website_home' });\n  }\n\n  if (item.json.website && item.json.website.length > 0) {\n    urlsToScrape.unshift({ url: item.json.website + '/contact', type: 'provided_contact' });\n    urlsToScrape.unshift({ url: item.json.website, type: 'provided_home' });\n  }\n\n  results.push({\n    json: {\n      restaurant_id: restaurantId,\n      business_name: businessName,\n      organic: organic,\n      urls_to_scrape: urlsToScrape,\n      facebook_page: facebookPage,\n      official_website: officialWebsite,\n      total_urls: urlsToScrape.length\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "cc1430d9-ea0a-4b48-9f8f-c14fc39a4b0b",
+      "name": "Extract All URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const organic = item.json.organic || [];\n  const restaurantId = item.json.restaurant_id;\n  const businessName = item.json.business_name || '';\n\n  let combinedContent = '';\n\n  for (const result of organic) {\n    const title = result.title || '';\n    const snippet = result.snippet || '';\n    const link = result.link || '';\n    \n    combinedContent += `\\n\\nTitle: ${title}\\nURL: ${link}\\nSnippet: ${snippet}`;\n  }\n\n  combinedContent += '\\n\\nFull Search Results:\\n' + JSON.stringify(organic);\n\n  results.push({\n    json: {\n      restaurant_id: restaurantId,\n      business_name: businessName,\n      organic: organic,\n      combined_content: combinedContent,\n      scraped_urls: organic.length,\n      source_types: 'search_results'\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "d386441e-7402-4113-b17f-9e2b7b483733",
+      "name": "Scrape All Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_ANTHROPIC_API_KEY"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"claude-sonnet-4-5-20250929\", \"max_tokens\": 1024, \"messages\": [{ \"role\": \"user\", \"content\": \"Extract all email addresses from this restaurant data. Return ONLY a JSON array format: [\\\"email1@domain.com\\\", \\\"email2@domain.com\\\"]. Include business emails (info@, contact@, orders@, etc) and owner emails. Exclude: noreply@, support@wix.com, @facebook.com, test@, example.com. If no emails found return [].\\n\\nData: \" + JSON.stringify($json).slice(0, 15000) }] } }}",
+        "options": {}
+      },
+      "id": "ffc889c6-2146-4fcc-b3fd-8233c7e5ad96",
+      "name": "Claude Extract Emails",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude response and validate emails\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const businessName = item.json.business_name || '';\n  const restaurantId = item.json.restaurant_id;\n  const scrapedUrls = item.json.scraped_urls || 0;\n  const sourceTypes = item.json.source_types || '';\n  const organic = item.json.organic || [];\n  \n  let extractedEmails = [];\n  \n  try {\n    const claudeResponse = item.json.content?.[0]?.text || '{}';\n    \n    let parsed;\n    if (claudeResponse.includes('[')) {\n      const jsonMatch = claudeResponse.match(/\\[.*?\\]/s);\n      if (jsonMatch) {\n        parsed = JSON.parse(jsonMatch[0]);\n      }\n    }\n    \n    if (Array.isArray(parsed)) {\n      extractedEmails = parsed;\n    } else {\n      const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;\n      const matches = claudeResponse.match(emailRegex) || [];\n      extractedEmails = matches;\n    }\n    \n  } catch (error) {\n    const searchData = JSON.stringify(organic);\n    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;\n    const matches = searchData.match(emailRegex) || [];\n    extractedEmails = matches;\n  }\n  \n  const validEmails = new Set();\n  const invalidPatterns = [\n    'example.com', 'test@', 'noreply', 'no-reply',\n    'donotreply', 'bounce@', 'mailer-daemon',\n    'postmaster@', '@localhost', '.png', '.jpg', '.gif',\n    'wixpress.com', 'sentry.io', 'squarespace.com',\n    '@facebook.com', '@instagram.com', '@twitter.com',\n    'support@wix', 'help@', 'privacy@', 'legal@'\n  ];\n  \n  for (const email of extractedEmails) {\n    const lower = email.toLowerCase().trim();\n    \n    if (!lower.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/)) continue;\n    \n    if (invalidPatterns.some(pattern => lower.includes(pattern))) continue;\n    \n    if (lower.length > 60) continue;\n    \n    validEmails.add(lower);\n  }\n  \n  const emailsArray = Array.from(validEmails);\n  const prioritized = emailsArray.sort((a, b) => {\n    const aIsContact = /^(info|contact|hello|orders|catering|reservations|booking)@/.test(a);\n    const bIsContact = /^(info|contact|hello|orders|catering|reservations|booking)@/.test(b);\n    if (aIsContact && !bIsContact) return -1;\n    if (!aIsContact && bIsContact) return 1;\n    \n    const aIsGeneric = /@(gmail|yahoo|hotmail|outlook|aol|icloud|live|msn|ymail)\\./.test(a);\n    const bIsGeneric = /@(gmail|yahoo|hotmail|outlook|aol|icloud|live|msn|ymail)\\./.test(b);\n    if (!aIsGeneric && bIsGeneric) return -1;\n    if (aIsGeneric && !bIsGeneric) return 1;\n    \n    return 0;\n  });\n  \n  let confidence = 0;\n  if (prioritized.length > 0) {\n    const primaryEmail = prioritized[0];\n    const isBusinessDomain = !/@(gmail|yahoo|hotmail|outlook|aol|icloud)\\./.test(primaryEmail);\n    const isContactEmail = /^(info|contact|hello|orders|reservations|catering)@/.test(primaryEmail);\n    const fromFacebook = sourceTypes.includes('facebook');\n    \n    if (isBusinessDomain && isContactEmail) confidence = 0.9;\n    else if (isBusinessDomain) confidence = 0.85;\n    else if (isContactEmail) confidence = 0.75;\n    else confidence = 0.65;\n    \n    if (prioritized.length > 1) confidence += 0.05;\n    if (fromFacebook) confidence += 0.05;\n    if (scrapedUrls >= 3) confidence += 0.03;\n    \n    confidence = Math.min(confidence, 0.95);\n  }\n  \n  results.push({\n    json: {\n      'Restaurant ID': restaurantId,\n      'Status': prioritized.length > 0 ? 'Email Found' : 'No Email Found',\n      'Primary Email': prioritized[0] || '',\n      'All Emails': prioritized.slice(0, 5).join(', '),\n      'Enrichment Confidence': confidence.toFixed(2),\n      'Last Enriched': new Date().toISOString().split('T')[0]\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "b4131333-578e-4597-83b8-38f3047b072f",
+      "name": "Validate & Prioritize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEETS_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Master",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "Status": "={{ $json['Status'] }}",
+            "Primary Email": "={{ $json['Primary Email'] }}",
+            "All Emails": "={{ $json['All Emails'] }}",
+            "Enrichment Confidence": "={{ $json['Enrichment Confidence'] }}",
+            "Last Enriched": "={{ $json['Last Enriched'] }}",
+            "row_number": 0
+          },
+          "matchingColumns": [
+            "Restaurant ID"
+          ],
+          "schema": [
+            {
+              "id": "Restaurant ID",
+              "displayName": "Restaurant ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Business Name",
+              "displayName": "Business Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Address",
+              "displayName": "Address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "City",
+              "displayName": "City",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "State",
+              "displayName": "State",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "POS System URL",
+              "displayName": "POS System URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Cuisine Type",
+              "displayName": "Cuisine Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Google Rating",
+              "displayName": "Google Rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Review Count",
+              "displayName": "Review Count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Lead Score",
+              "displayName": "Lead Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Driver Status",
+              "displayName": "Driver Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "POS System",
+              "displayName": "POS System",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Third Party Delivery",
+              "displayName": "Third Party Delivery",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Delivery Volume",
+              "displayName": "Delivery Volume",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Pain Points",
+              "displayName": "Pain Points",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Location Count",
+              "displayName": "Location Count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Years in Business",
+              "displayName": "Years in Business",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Current Method",
+              "displayName": "Current Method",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Weekly Deliveries",
+              "displayName": "Weekly Deliveries",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Confidence Score",
+              "displayName": "Confidence Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Last Sent Date",
+              "displayName": "Last Sent Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Call Status",
+              "displayName": "Call Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Hours",
+              "displayName": "Hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Primary Email",
+              "displayName": "Primary Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "All Emails",
+              "displayName": "All Emails",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Enrichment Confidence",
+              "displayName": "Enrichment Confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Last Enriched",
+              "displayName": "Last Enriched",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ad2f8630-f9ab-4b6b-b970-31654a88d3ce",
+      "name": "Update Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2912,
+        -656
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const batchItems = $('Current Batch Context').all(); // Reference the batch Code node added above\nconst searchItems = $input.all();\nreturn searchItems.map((item, i) => ({\n  json: {\n    ...batchItems[i].json,\n    ...item.json\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -720
+      ],
+      "id": "d8afee5a-ea0d-4fe7-b094-52c3dc980c7d",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeItems = $input.all();\nconst scrapeItems = $('Scrape All Pages').all();\n\nconst results = [];\n\nfor (let i = 0; i < claudeItems.length; i++) {\n  results.push({\n    json: {\n      ...scrapeItems[i].json,\n      ...claudeItems[i].json\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -720
+      ],
+      "id": "d78f4d64-3ee9-4873-8e00-42b6b32744cb",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        672,
+        -656
+      ],
+      "id": "12eb3ebc-202a-4cb7-80b2-4ca184709ac5",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        -720
+      ],
+      "id": "98151e7b-0940-4c96-b9f9-87ee2ff890fa",
+      "name": "Wait",
+      "webhookId": "4c7458b2-c8d4-422b-a9e1-242bdc945a7f"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -720
+      ],
+      "id": "e6969faf-83ab-4058-8ef6-c84487e1b2f2",
+      "name": "Current Batch Context"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Restaurants",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Restaurants": {
+      "main": [
+        [
+          {
+            "node": "Filter Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Pending": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search All Sources": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract All URLs": {
+      "main": [
+        [
+          {
+            "node": "Scrape All Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape All Pages": {
+      "main": [
+        [
+          {
+            "node": "Claude Extract Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Extract Emails": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Prioritize": {
+      "main": [
+        [
+          {
+            "node": "Update Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Extract All URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Validate & Prioritize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Current Batch Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current Batch Context": {
+      "main": [
+        [
+          {
+            "node": "Search All Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b57906ae-0b85-4479-8e88-0629d1a94dab",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "INSTANCE_ID"
+  },
+  "id": "WORKFLOW_ID",
+  "tags": []
+}

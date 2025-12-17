@@ -1,0 +1,33 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# API keys (never commit these)
+**/credentials.json
+**/secrets.json
+
+# n8n specific
+.n8n/
+*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Test data with real emails
+test-data/
+sample-output/
+
+# Node modules (if any tooling added)
+node_modules/
