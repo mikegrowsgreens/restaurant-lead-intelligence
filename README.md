@@ -1,4 +1,5 @@
 # Restaurant Lead Intelligence System
+![Workflow Screenshot](images/lead-gen.png)
 
 Automated lead qualification pipeline that discovers restaurant contacts, enriches with ICP scoring, and delivers prioritized outreach lists. Built with n8n, Claude AI, and Google Search APIs.
 
