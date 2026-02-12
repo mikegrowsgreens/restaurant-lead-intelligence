@@ -1,15 +1,12 @@
-# Environment variables
+# Environment and credentials
 .env
-.env.local
-.env.*.local
+credentials.json
+token.json
+*.pem
 
-# API keys (never commit these)
-**/credentials.json
-**/secrets.json
-
-# n8n specific
-.n8n/
-*.sqlite
+# Temporary processing files
+.tmp/
+tmp/
 
 # OS files
 .DS_Store
@@ -18,16 +15,12 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# Logs
-*.log
-logs/
-
-# Test data with real emails
-test-data/
-sample-output/
-
-# Node modules (if any tooling added)
+# Node
 node_modules/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/

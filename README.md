@@ -1,180 +1,107 @@
-# Restaurant Lead Intelligence System
-![Workflow Screenshot](images/lead-gen.png)
+# Restaurant Lead Intelligence Platform
 
-Automated lead qualification pipeline that discovers restaurant contacts, enriches with ICP scoring, and delivers prioritized outreach lists. Built with n8n, Claude AI, and Google Search APIs.
+End-to-end lead generation and enrichment pipeline for the restaurant vertical. Built at Shipday to transform raw restaurant data into qualified, actionable leads with verified contact information.
+
+## Problem
+
+I was handed lead lists of 10,000+ restaurants with no qualification, no prioritization, and 60%+ missing contact information. Manual research took 4-5 minutes per lead. At that rate, properly qualifying the list would take 100+ hours of pure data entry. Meanwhile, I was expected to be on the phone selling.
+
+The lists also had no ICP filtering. They included every type of restaurant from fine dining to food trucks, with no way to identify which ones were actually good prospects for a delivery logistics platform.
+
+## Solution
+
+A multi-workflow system that handles discovery, enrichment, scoring, and delivery:
+
+### Workflow 1: ToastTab Lead Generator (`toasttab-lead-gen.json`)
+- Uses Serper API to search Google for `site:toasttab.com/local` across target states
+- ToastTab presence is itself a buying signal: it means the restaurant has a modern POS system and is likely technology-forward
+- Extracts and deduplicates restaurant URLs from search results
+- Scrapes each ToastTab page for business name, address, phone, cuisine type, website
+- Searches Google for restaurant email addresses using business name + city + "contact email"
+- Uses Claude API to intelligently extract email addresses from search result snippets
+- Writes enriched leads to Google Sheets with status tracking
+- Covers 6+ states: CT, MA, MD, MN, WI, IN
+
+### Workflow 2: Email Enrichment Pipeline (`email-enrichment.json`)
+- Reads restaurants from the master Google Sheet that need email enrichment
+- Runs multi-source search: Google results, Facebook pages, official website scraping
+- Claude extracts and validates email addresses from unstructured web content
+- Confidence scoring based on email domain match and prefix type
+- Prioritizes business emails (info@, contact@, orders@) over generic ones
+- Updates the master sheet with results, confidence scores, and enrichment timestamps
+
+### Workflow 3: Google Maps Discovery (`google-maps-scraper.json`)
+- Alternative discovery method using Google Maps/Places API
+- Searches for restaurants by cuisine type and location
+- Extracts business details, ratings, review counts, operating hours
+- Feeds into the same enrichment pipeline
+
+## Scoring Algorithm
+
+The 150-point scoring system evaluates 12+ operational signals:
+
+| Signal | Weight | What It Indicates |
+|--------|--------|-------------------|
+| Cuisine type (Pizza/Italian) | High | Delivery-heavy cuisine = higher platform need |
+| Google rating (below 4.0) | Medium | Potential operational challenges = pain point |
+| Review count (high volume) | Medium | Established business with customer base |
+| Third-party delivery presence | High | Already doing delivery = easier adoption |
+| Delivery volume indicators | High | High volume = more revenue potential |
+| POS system type | Medium | Tech-forward = more likely to adopt |
+| Driver status | High | "Hiring drivers" = active delivery operation |
+| Location count | Medium | Multi-location = larger deal potential |
+| Website quality | Low | Professional online presence = business maturity |
+| Pain point indicators | High | Mentions of delivery challenges in reviews |
+| Years in business | Low | Established = more stable revenue |
+| Operating hours | Low | Late-night/extended hours = delivery demand |
+
+## Email Extraction Methodology
+
+The Claude-powered email extraction handles cases that regex cannot:
+
+- Obfuscated emails: "info [at] restaurant [dot] com"
+- Context-dependent extraction: Distinguishing business emails from platform emails
+- Confidence assessment: Domain match to business name increases confidence
+- Exclusion logic: Filters out noreply@, support@wix.com, @facebook.com, test@, example.com
+- Fallback: If Claude extraction fails, raw regex serves as backup
+
+Discovery rate: 65-80% of restaurants processed yield at least one verified email address.
 
 ## Results
 
-| Metric | Value |
-|--------|-------|
-| Email Discovery Rate | 65-80% |
-| Cost Per State Run | $6.49 |
-| Leads Per Run | 500-1,200 |
-| Confidence Scoring | 0.65-0.95 |
-| Execution Time | ~45 min (6 states) |
+- Processed 1,000+ restaurants across CT and MA markets
+- 600+ verified contacts extracted for targeted outreach
+- $6.49 average cost per state run
+- 15-20 hours/week saved on manual research
+- 85%+ data confidence on enriched records
+- System scales to any state by adding search queries (no code changes needed)
 
-## How It Works
+## Files
 
-```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐    ┌──────────────┐    ┌──────────┐
-│  Discovery  │───▶│  ICP Score   │───▶│  Contact    │───▶│  Prioritize  │───▶│  Deliver │
-│  ToastTab   │    │  Cuisine,    │    │  Discovery  │    │  By Score    │    │  Sheets  │
-│  Scraping   │    │  Rating, POS │    │  Email/FB   │    │  & Tier      │    │  Export  │
-└─────────────┘    └──────────────┘    └─────────────┘    └──────────────┘    └──────────┘
-```
-
-**Stage 1: Discovery**
-- Scrapes ToastTab ordering pages via Google Search
-- Extracts business name, address, cuisine type
-- Targets 6 states: CT, MA, MD, MN, WI, IN
-
-**Stage 2: ICP Qualification**
-- Scores leads against Ideal Customer Profile
-- Weights: Pizza/Italian (+25), Rating <4.0 (+20), Third-party delivery (+20)
-- Filters out non-qualifying businesses
-
-**Stage 3: Contact Discovery**
-- Multi-source search: Facebook, official websites, directories
-- Claude AI extracts and validates email addresses
-- Filters spam patterns and generic domains
-
-**Stage 4: Prioritization**
-- Confidence scoring (0.65-0.95) based on email quality
-- Tier assignment for outreach sequencing
-- Deduplication across sources
-
-**Stage 5: Delivery**
-- Updates Google Sheets with enriched data
-- Ready for CRM import or direct outreach
-
-## Tech Stack
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Orchestration | n8n (self-hosted) | Workflow automation |
-| AI Extraction | Claude Sonnet 4.5 | Email parsing, validation |
-| Search | Serper API | Google Search results |
-| Data Store | Google Sheets | Lead storage, export |
-| Hosting | DigitalOcean | n8n instance |
-
-## Cost Breakdown
-
-| Service | Cost Per Run | Notes |
-|---------|--------------|-------|
-| Serper API | ~$3.00 | 10 searches/state × 6 states |
-| Claude API | ~$2.50 | ~500 extraction calls |
-| n8n Hosting | ~$0.99 | Prorated monthly |
-| **Total** | **$6.49** | Per 6-state run |
-
-## Workflows Included
-
-### 1. ToastTab Lead Generator (`workflows/toasttab-lead-generator.json`)
-Discovers restaurants using ToastTab POS via Google Search. Extracts business details from ordering pages.
-
-### 2. Email Enrichment (`workflows/email-enrichment.json`)
-Takes discovered leads and finds contact emails through multi-source search and AI extraction.
-
-## Setup
-
-### Prerequisites
-- n8n instance (cloud or self-hosted)
-- Serper API key ([serper.dev](https://serper.dev))
-- Anthropic API key ([console.anthropic.com](https://console.anthropic.com))
-- Google Sheets API credentials
-
-### Installation
-
-1. **Clone the repo**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/restaurant-lead-intelligence.git
-   ```
-
-2. **Import workflows to n8n**
-   - Open your n8n instance
-   - Go to Workflows > Import from File
-   - Import both JSON files from `/workflows`
-
-3. **Configure credentials**
-   - Replace `YOUR_SERPER_API_KEY` in HTTP Request nodes
-   - Replace `YOUR_ANTHROPIC_API_KEY` in Claude nodes
-   - Connect Google Sheets OAuth credentials
-   - Update `YOUR_GOOGLE_SHEETS_ID` with your sheet ID
-
-4. **Set up Google Sheet**
-   - Create a new Google Sheet
-   - Use the schema from `/schemas/google-sheets-schema.json`
-   - Required columns: Restaurant ID, Business Name, Address, City, State, Phone, Website, Status, Primary Email, All Emails, Enrichment Confidence, Last Enriched
-
-5. **Test run**
-   - Start with a single state to verify configuration
-   - Check execution logs for any credential errors
-   - Validate emails are being written to sheet
-
-## Configuration
-
-### Target States
-Edit the `Generate Search Queries` node in `toasttab-lead-generator.json`:
-
-```javascript
-const targetStates = [
-  { code: 'CT', name: 'Connecticut', searchQueries: [...] },
-  { code: 'MA', name: 'Massachusetts', searchQueries: [...] },
-  // Add or remove states as needed
-];
-```
-
-### ICP Scoring Weights
-Modify the scoring logic in the Filter/Score nodes:
-
-| Factor | Default Weight | Rationale |
-|--------|----------------|-----------|
-| Pizza/Italian Cuisine | +25 | Higher delivery volume |
-| Google Rating < 4.0 | +20 | More likely to need help |
-| Third-party Delivery | +20 | Already delivery-focused |
-| Review Count 100+ | +15 | Established business |
-| Multi-location | +10 | Larger operation |
-| Toast POS User | +10 | Tech-forward |
-
-### Batch Size
-Adjust in the `Loop Over Items` node:
-- Default: 5 items per batch
-- Increase for faster runs (higher API costs)
-- Decrease for rate limit safety
-
-## Design Decisions
-
-**Why n8n over Zapier/Make?**
-- Self-hosted = no per-task pricing at scale
-- Code nodes for complex logic
-- Better error handling and retry controls
-
-**Why Claude AI over regex?**
-- Handles malformed HTML gracefully
-- Context-aware extraction (ignores nav emails, footers)
-- Validates email patterns intelligently
-
-**Why batch processing?**
-- Respects API rate limits
-- Allows partial completion on errors
-- Easier debugging of failed items
+| File | Description |
+|------|-------------|
+| `workflows/toasttab-lead-gen.json` | ToastTab discovery via Google Search |
+| `workflows/email-enrichment.json` | Production email enrichment pipeline |
+| `workflows/google-maps-scraper.json` | Google Maps based discovery |
+| `database/schema.sql` | PostgreSQL table definitions |
+| `docs/scoring-algorithm.md` | Full 150-point scoring breakdown |
+| `docs/email-extraction.md` | AI extraction methodology and examples |
 
 ## Transferability
 
-This architecture works for any ICP-based lead qualification:
+This architecture is vertical-agnostic. To adapt it to a different market:
 
-- **SaaS Sales**: Company enrichment + decision-maker discovery
-- **Real Estate**: Property owner contact finding
-- **Recruiting**: Candidate sourcing + contact enrichment
-- **Agency Prospecting**: Business discovery + stakeholder identification
+1. **Change the discovery source** -- Replace ToastTab with G2, Crunchbase, or any directory
+2. **Adjust ICP criteria** -- Replace cuisine type with tech stack, replace review count with employee count
+3. **Update enrichment sources** -- Different verticals have different data sources
+4. **Modify scoring weights** -- Each market has different signals that matter
 
-The pattern: Discovery > Qualification > Enrichment > Prioritization > Delivery
+The pipeline structure (Discover, Enrich, Score, Deliver) stays exactly the same.
 
-## License
+## Setup
 
-MIT License. Use freely, attribution appreciated.
-
-## Author
-
-Built by [Mike Paulus](https://linkedin.com/in/mapaulus)
-
-GTM Systems Engineer | Revenue Infrastructure | n8n, Python, SQL, CRM Automation
+1. Import workflow JSON files into your n8n instance
+2. Configure credentials: Serper API, Anthropic, Google Sheets, ScraperAPI
+3. Create a Google Sheet with the expected column structure (see schema)
+4. Update target states and search queries in the "Generate Search Queries" node
+5. Run manually for first batch, then enable scheduling
